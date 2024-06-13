@@ -1,0 +1,9 @@
+import(methods)
+import(parallel)
+
+exportClasses(Time,FcTime,ObsTime,Domain,Grid,LAMGrid,GaussGrid)
+
+exportMethods("[","==",length,degrade,initialize,interpgrid,sectioncs,select)
+
+export(area,compass,extendPoints,geoCoords,inDomain,interp,interpAB,rangeLong,sectiongeo,
+	zoom)
