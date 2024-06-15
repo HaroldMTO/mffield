@@ -11,19 +11,10 @@ setClass("Grid",representation(lat="numeric",long="numeric",ind="integer"),
 	if (any(is.infinite(object@long))) return("long Inf")
 	if (any((object@long+180)%%360 != object@long+180)) return("long out of [-180,180[")
 
-	#if (length(object@ind) > 0 && length(object@npdg0) == 0) return("ind with no npdg0")
-	#if (length(object@ind) == 0 && length(object@npdg0) > 0) return("npdg0 with no ind")
-
 	if (length(object@ind) > 0) {
-		#if (length(object@npdg0) != 1) return("length(npdg0) != 1")
-		#if (is.na(object@npdg0)) return("npdg0 NA")
-		#if (is.infinite(object@npdg0)) return("npdg0 Inf")
-		#if (object@npdg0 < 4) return("npdg0 < 4")
-
 		if (any(is.na(object@ind))) return("ind NA")
 		if (any(is.infinite(object@ind))) return("ind Inf")
 		if (any(object@ind <= 0)) return("ind <= 0")
-		#if (any(object@ind > object@npdg0)) return("ind > npdg0")
 	}
 
 	return(TRUE)
@@ -45,6 +36,12 @@ setGeneric("degrade",signature="grid",def=function(grid,ilat,nlat=2,nlon=2)
 setGeneric("interpgrid",signature=c("g","grid"),def=function(g,grid,field,method,mc.cores)
 {
 	standardGeneric("interpgrid")
+}
+)
+
+setGeneric("zonalmean",signature="g",def=function(g,field)
+{
+	standardGeneric("zonalmean")
 }
 )
 
@@ -81,6 +78,24 @@ setMethod("select","Grid",def=function(grid,npmax)
 }
 )
 
+setGeneric("sectiongeogrid",signature="grid",def=function(grid,field,long,lat)
+{
+	standardGeneric("sectiongeogrid")
+}
+)
+
+setGeneric("sectioncsgrid",signature="grid",def=function(field,grid,long,lat)
+{
+	standardGeneric("sectioncsgrid")
+}
+)
+
+setGeneric("zonalmeangrid",signature="grid",def=function(grid,field)
+{
+	standardGeneric("zonalmeangrid")
+}
+)
+
 inDomain = function(grid,domain)
 {
 	ilat = domain@ylim[1] <= grid@lat & grid@lat <= domain@ylim[2]
@@ -94,21 +109,6 @@ inDomain = function(grid,domain)
 	}
 
 	ilat & ilon
-}
-
-toMatrix = function(grid,x)
-{
-	nlat = length(grid@nlong)
-	clats = c(0,cumsum(grid@nlong))
-	data = matrix(nrow=max(grid@nlong),ncol=nlat)
-
-	for (ilat in seq(nlat)) {
-		ip = clats[ilat]
-		np = grid@nlong[ilat]
-		data[1:np,ilat] = x[ip+1:np]
-	}
-
-	data
 }
 
 interp1d0 = function(datao,clato,ilato,ilono1,e1)
@@ -145,3 +145,148 @@ interp1 = function(datao,clato,ilato,ilono1,ilono2,e0,e1,e2)
 
 	d1+e0*(d2-d1)
 }
+
+decircleLong = function(x)
+{
+	il = which(abs(diff(x)) > 180)
+	stopifnot(length(il) <= 2)
+	for (i in rev(il)) x[-(1:i)] = x[-(1:i)]-360*sign(diff(x)[i])
+
+	x
+}
+
+decircleLat = function(x)
+{
+	il = which(abs(diff(x)) > 90)
+	stopifnot(length(il) <= 2)
+	for (i in rev(il)) x[-(1:i)] = x[-(1:i)]-180*sign(diff(x)[i])
+
+	x
+}
+
+setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
+{
+	stopifnot(all(-90 <= lat & lat <= 90))
+
+	# grid longs belong to [-180,180[
+	if (length(long) == 1) {
+		stopifnot(diff(lat) > 0)
+		xf = grid@lat
+		yf = grid@long
+		x = lat
+		y = (long+180)%%360-180
+	} else if (length(lat) == 1) {
+		stopifnot(diff(long) > 0)
+		xf = grid@long
+		yf = grid@lat
+		x = (long+180)%%360-180
+		y = lat
+	} else {
+		stop("lat or long must be of length 1")
+	}
+
+	nlat = length(grid@nlong)
+	clats = c(0,cumsum(grid@nlong))
+
+	data1 = array(dim=c(2,nlat,dim(field)[2]))
+	x1 = array(dim=c(2,nlat))
+	my = numeric(nlat)
+
+	for (ilat in seq(nlat)) {
+		off = clats[ilat]
+		np = grid@nlong[ilat]
+		ip = off+1:np
+		xfn = xf[ip]
+		yfn = yf[ip]
+		yi = y
+		# 1 more point (1st one) for global grid
+		xfn = extendPoints(grid,xfn)
+		yfn = extendPoints(grid,yfn)
+		if (length(long) == 1) {
+			xfn = decircleLat(xfn)
+			yfn = decircleLong(yfn)
+			stopifnot(all(diff(yfn) > -180))
+			if (yi < min(yfn)) yi = yi+360
+		} else {
+			xfn = decircleLong(xfn)
+			yfn = decircleLat(yfn)
+			stopifnot(all(diff(xfn) > -180))
+		}
+
+		np = length(yfn)
+		indy = which.min(abs(yi-yfn))+seq(-2,2)
+		indy = indy[0 < indy & indy <= np]
+		my[ilat] = mean(yfn[indy])
+
+		# increasing or decreasing point values
+		ind = yfn[-np] <= yi & yi < yfn[-1] | yfn[-1] <= yi & yi < yfn[-np]
+		if (all(! ind)) next
+
+		i1 = which(ind)
+		stopifnot(length(i1) <= 2)
+		stopifnot(all(i1 < np))
+
+		# point np is only valid for global Gauss grids but never happens (i1 < np)
+		i2 = i1+1
+		e = (yi-yfn[i1])/(yfn[i2]-yfn[i1])
+		# e can be 1 because of precision:
+		# e = (b*(1-eps)-a)/(b-a)=1-b*eps/(b-a)=1-eps/(1-a/b), and e=1 for some cases
+		stopifnot(all(0 <= e & e <= 1))
+
+		for (i in seq(along=i1)) {
+			data1[i,ilat,] = (1-e[i])*field[off+i1[i],]+e[i]*field[off+i2[i],]
+			x1[i,ilat] = (1-e[i])*xfn[i1[i]]+e[i]*xfn[i2[i]]
+		}
+	}
+
+	x1 = as.vector(x1)
+	if (length(na.omit(x1)) < 5 && length(lat) == 1) {
+		#stopifnot(length(lat) == 1)
+
+		ilat = 1+(which(! is.na(x1))-1)%/%2
+		cat("--> few lats crossing:",length(ilat),length(na.omit(x1)),"\n")
+		if (length(ilat) == 0) {
+			#ilat = which.min(abs(yi-my))
+			ilat = which.min(my)
+		} else if (length(ilat) > 1) {
+			#ilat = ilat[which.min(abs(yi-my[ilat]))]
+			ilat = ilat[which.min(my[ilat])]
+		}
+
+		cat("--> lat crossing:",ilat,"\n")
+		ind = clats[ilat]+seq(grid@nlong[ilat])
+		return(list(longs=xf[ind],lat=lat,data=field[ind,]))
+	}
+
+	if (all(is.na(x1))) {
+		if (length(long) == 1) stop(paste("no lat/long crossing given long",long))
+		if (length(lat) == 1) stop(paste("no lat/long crossing given lat",lat))
+	}
+
+	if (length(lat) == 1 && diff(x) < 0) {
+		xn = x1[x1 < 0]
+		xp = x1[x1 >= 0]
+		indn = order(xn,na.last=NA)
+		indp = order(xp,na.last=NA)
+		ind = match(c(xp[indp],xn[indn]),x1)
+		ii = which(x[1] <= x1[ind] | x1[ind] <= x[2])
+		cat("--> long:",x1[ind],"\n")
+	} else {
+		ind = order(x1,na.last=NA)
+		ii = which(x[1] <= x1[ind] & x1[ind] <= x[2])
+	}
+
+	ind = ind[ii]
+	stopifnot(all(! is.na(x1[ind])))
+
+	dim(data1) = c(2*nlat,dim(field)[2])
+	stopifnot(all(! is.na(data1[ind,1])))
+
+	if (length(long) == 1) {
+		list(lats=x1[ind],data=data1[ind,])
+	} else {
+		list(longs=x1[ind],data=data1[ind,])
+	}
+}
+)
+

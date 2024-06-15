@@ -33,8 +33,8 @@ setClass("GaussGrid",representation(nlong="integer",pole="numeric",stretch="nume
 	if (any(duplicated(object@theta)[-1])) return("theta duplicated")
 
 	dlat = diff(object@theta)
-	if (dlat[1] < 0 && any(dlat > 0)) return("lat not strictly decreasing")
-	if (dlat[1] > 0 && any(dlat < 0)) return("lat not strictly increasing")
+	if (any(dlat > 0)) return("lat not strictly decreasing")
+	#if (dlat[1] > 0 && any(dlat < 0)) return("lat not strictly increasing")
 
 	return(TRUE)
 }
@@ -99,7 +99,7 @@ csLong = function(grid)
 
 	for (i in seq(nlat)) {
 		np = grid@nlong[i]
-		longs[seq(np),i] = 360*(seq(np)-1)/np
+		longs[seq(np),i] = 180/pi*csLongi(np)
 	}
 
 	longs
@@ -259,17 +259,15 @@ setMethod("degrade","GaussGrid",def=function(grid,ilat,nlat,nlon)
 	stopifnot(length(grid@nlong) == length(ilat))
 
 	grid@lat = grid@long = numeric(npdg)
-	#grid@ind = integer(npdg)
 
 	off = 0
 	for (i in seq(along=grid@nlong)) {
-		ind = seq(1,nlong[ilat[i]],nlon)
-		np = length(ind)
+		ip = clats[ilat[i]]+seq(1,nlong[ilat[i]],nlon)
+		np = length(ip)
 		stopifnot(np == grid@nlong[i])
 
-		grid@lat[off+1:np] = lats[clats[ilat[i]]+ind]
-		grid@long[off+1:np] = longs[clats[ilat[i]]+ind]
-		#grid@ind[off+1:np] = clats[i]+ind
+		grid@lat[off+1:np] = lats[ip]
+		grid@long[off+1:np] = longs[ip]
 		off = off+np
 	}
 
@@ -306,11 +304,15 @@ ig = function(g,grid,field,method)
 
 	clats = c(0,cumsum(grid@nlong))
 	clato = c(0,cumsum(g@nlong))
-	#dlat = 180/nlato
 	dlon = 360/g@nlong
 
 	for (ilat in seq(along=grid@nlong)) {
-		ilato = max(which(thetao2 >= theta2[ilat]))
+		if (theta2[ilat] > thetao2[1]) {
+			ilato = 1
+		} else {
+			ilato = max(which(thetao2 >= theta2[ilat]))
+		}
+
 		stopifnot(0 < ilato && ilato <= nlato)
 
 		longs = 180/pi*csLongi(grid@nlong[ilat])
@@ -322,7 +324,7 @@ ig = function(g,grid,field,method)
 		stopifnot(all(0 <= e1 & e1 < 1))
 
 		ip = clats[ilat]+ilon
-		if (ilato == nlato) {
+		if (theta2[ilat] > thetao2[1] || ilato == nlato) {
 			data[ip,] = interp1dfun(field,clato,ilato,ilono1,e1)
 			next
 		}
@@ -354,7 +356,11 @@ interplat = function(ilat,g,grid,cs,clats,clato,dlono,theta2,thetao2,interp1dfun
 
 	for (i in seq(grid@nlong[ilat])) {
 		ip = clats[ilat]+i
-		ilato = max(which(thetao2 >= cs$lat[ip]))
+		if (cs$lat[ip] >= thetao2[1]) {
+			ilato = 1
+		} else {
+			ilato = max(which(thetao2 >= cs$lat[ip]))
+		}
 
 		e1 = cs$long[ip]/dlono[ilato]
 		ilono1 = floor(e1)+1
@@ -468,7 +474,7 @@ igeopoint = function(g,grid,field,method)
 			}
 
 			# North from 1st lat or south from last lat (ie ilat = nlat)
-			if (ilat == 1 || ilat == length(grid@nlong)) {
+			if (csg$lat[ip] >= theta2[1] || ilat == length(grid@nlong)) {
 				e0 = 0
 			} else {
 				e0 = (theta2[ilat]-csg$lat[ip])/(theta2[ilat]-theta2[ilat+1])
@@ -545,3 +551,186 @@ setMethod("interpgrid",signature(g="GaussGrid",grid="GaussGrid"),
 	data
 }
 )
+
+setMethod("zonalmeangrid",signature("GaussGrid"),def=function(grid,field)
+{
+	nlat = length(grid@nlong)
+	data = matrix(nrow=nlat,ncol=dim(field)[2])
+	dimnames(data)[[2]] = dimnames(f)[[2]]
+
+	clats = c(0,cumsum(grid@nlong))
+
+	if (grid@pole[1] == 1) {
+		for (ilat in seq(nlat)) {
+			ip = clats[ilat]+seq(grid@nlong[ilat])
+			data[ilat,] = apply(field[ip,,drop=FALSE],2,mean)
+		}
+	} else {
+		# among lats, find for the same geo theta as the unstretched cs theta
+		geolat = c(sort(grid@theta),90)
+		ind = findInterval(grid@lat,geolat,all.inside=TRUE)
+		stopifnot(all(0 < ind & ind <= nlat))
+
+		for (ilat in seq(nlat)) data[ilat,] = apply(field[ind==ilat,,drop=FALSE],2,mean)
+	}
+
+	data
+}
+)
+
+# divided difference of order n (recursive computation)
+ddiffn = function(x,y,n,yprev)
+{
+	if (n == 0) {
+		return(y)
+	} else if (n == 1) {
+		return(diff(y[1:2])/diff(x[1:2]))
+	}
+
+	if (missing(yprev)) {
+		yx1 = ddiffn(x[-(n+1)],y[-(n+1)],n-1)
+	} else {
+		yx1 = yprev
+	}
+
+	yx2 = ddiffn(x[-1],y[-1],n-1)
+	(yx2-yx1)/(x[n+1]-x[1])
+}
+
+# Newton's polynom (or Newton's form of the Lagrange polynom)
+Pn = function(x,y,n,xh)
+{
+	yprev = y
+	for (i in (1:n)+1) yprev[i] = ddiffn(x[1:i],y[1:i],i-1,yprev[i-1])
+
+	yprev = yprev[-1]
+	if (missing(xh)) return(yprev)
+
+	y[1]+sum(sapply(1:n,function(i) yprev[i]*prod(xh-x[1:i])))
+}
+
+dprodf = function(x,xh)
+{
+	if (length(x) == 1) return(1)
+
+	# sum of Lagrange polynoms (li = prod(x-xj) with j!=), really?
+	sum(sapply(seq(along=x),function(j) prod(xh-x[-j])))
+}
+
+dPn = function(x,y,n,xh)
+{
+	newt = Pn(x,y,n)
+
+	# derivative of Newton's polynom?
+	sum(sapply(1:n,function(i) newt[i]*dprodf(x[1:i],xh)))
+}
+
+gradl = function(data,grid,method="newton",mc.cores=1)
+{
+	stopifnot(is(grid,"GaussGrid"))
+	stopifnot(method %in% c("newton","FD"))
+
+	clats = c(0,cumsum(grid@nlong))
+	nlat = length(grid@nlong)
+
+	datal = data
+
+	for (i in seq(nlat)) {
+		ip = clats[i]+seq(grid@nlong[i])
+		np = length(ip)
+
+		# circular points (1 or 2 shifted)
+		ip1 = c(ip[np],ip[-np])
+		ip3 = c(ip[-1],ip[1])
+		ip0 = c(ip[np-1:0],ip[0:1-np])
+		ip4 = c(ip[-(1:2)],ip[1:2])
+
+		if (method == "newton") {
+			m = t(matrix(c(ip0,ip1,ip,ip3,ip4),ncol=5))
+
+			for (j in seq(dim(data)[2])) {
+				a = mclapply(seq(dim(m)[2]),function(k) dPn(1:5,data[m[,k],j],4,3),
+					mc.cores=mc.cores)
+				datal[ip,j] = simplify2array(a)
+			}
+		} else {
+			dlon = abs(diff(grid@long[ip[1:2]]))
+			a = cos(grid@lat[ip[1]]*pi/180)
+			dl = sqrt(diff(grid@lat[ip[1:2]])^2+(a*pmin(dlon,360-dlon))^2)
+			dd = data[ip3,]-data[ip1,]
+			#d3 = dd/(2*dl)
+			#d5 = dd/(4*dl)
+			#data = 2*d3-d5
+			datal[ip,] = 3/4*dd/dl
+		}
+	}
+
+	datal
+}
+
+setMethod("sectioncsgrid",signature(grid="GaussGrid"),
+	def=function(field,grid,long=c(0,360),lat=c(-90,90))
+{
+	stopifnot(all(-90 <= lat & lat <= 90))
+
+	clats = c(0,cumsum(grid@nlong))
+	dlon = 360/grid@nlong
+
+	if (length(long) == 1) {
+		if (length(lat) == 1) {
+			dlat = 180/(length(grid@nlong)+1)
+			ilat = which.max(grid@theta <= lat)
+			e0 = (90-dlat/2-grid@theta[ilat])/dlat-ilat+1
+			ind = c(ilat,ilat+1)
+		} else {
+			ind = which(min(lat) <= grid@theta & grid@theta <= max(lat))
+		}
+
+		data = matrix(nrow=length(ind),ncol=dim(field)[2])
+		lats = longs = numeric(length(ind))
+
+		# grid (CS) longs belong to [0,360[ (use positive values)
+		long = long%%360
+
+		for (i in seq(along=ind)) {
+			ilat = ind[i]
+			e = long/dlon[ilat]
+			ilon = floor(e)+1
+			e = e-(ilon-1)
+			ip1 = clats[ilat]+ilon
+			ip2 = clats[ilat]+ilon%%(clats[ilat+1]-clats[ilat])+1
+			data[i,] = (1-e)*field[ip1,]+e*field[ip2,]
+			lats[i] = (1-e)*grid@lat[ip1]+e*grid@lat[ip2]
+			longs[i] = grid@long[ip1]
+		}
+
+		if (length(lat) == 1) data = data[1,]+e0*(data[2,]-data[1,])
+
+		list(theta=grid@theta[ind],lats=lats,longs=longs,data=data)
+	} else if (length(lat) == 1) {
+		# cannot sort or do modulo because long is used as ordered values
+		long = unique(long)
+		stopifnot(length(long) == 2)
+		stopifnot(all(0 <= long & long <= 360))
+
+		ilat = max(which(grid@theta >= lat))
+		longs = 180/pi*csLongi(grid@nlong[ilat])
+
+		if (long[1] < long[2]) {
+			ind = which(long[1] <= longs & longs <= long[2])
+		} else {
+			ind = c(which(long[1] <= longs & longs <= 360),
+				which(0 <= longs & longs <= long[2]))
+		}
+
+		data = field[clats[ilat]+ind,j]
+
+		#e = (lat-grid@theta[ilat])/diff(grid@theta[ilat+0:1])
+
+		ip = clats[ilat]+ind
+
+		list(lambda=longs[ind],lats=grid@lat[ip],longs=grid@long[ip],data=data)
+	}
+}
+)
+

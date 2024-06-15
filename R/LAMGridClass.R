@@ -56,8 +56,9 @@ setMethod("degrade","LAMGrid",def=function(grid,ilat,nlat,nlon)
 		# save
 		nlong = grid@nlong
 
-		lats = toMatrix(grid,grid@lat)
-		longs = toMatrix(grid,grid@long)
+		clats = c(0,cumsum(grid@nlong))
+		lats = grid@lat
+		longs = grid@long
 
 		# update
 		nlon = as.integer(nlon)
@@ -66,16 +67,15 @@ setMethod("degrade","LAMGrid",def=function(grid,ilat,nlat,nlon)
 
 		grid@lat = grid@long = numeric(npdg)
 
-		ip = 0
+		off = 0
 		for (i in ilat) {
-			ind = seq(1,nlong[i],nlon)
+			ind = clats[ilat[i]]+seq(1,nlong[i],nlon)
 			np = length(ind)
 			stopifnot(np == grid@nlong[i])
 
-			grid@lat[ip+1:np] = lats[ind,i]
-			grid@long[ip+1:np] = longs[ind,i]
-			#grid@ind[ip+1:np] = clats[i]+ind
-			ip = ip+np
+			grid@lat[off+1:np] = lats[ind]
+			grid@long[off+1:np] = longs[ind]
+			off = off+np
 		}
 	}
 

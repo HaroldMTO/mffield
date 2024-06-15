@@ -35,10 +35,24 @@ setMethod("initialize","Domain",def=function(.Object,long="numeric",lat="numeric
 
 rangeLong = function(long)
 {
-	dlong1 = range(long%%360)-180
+	if (length(long) == 0) stop("no long provided")
+	if (length(long) == 1) return(long)
+
+	if (length(long) == 2) {
+		dlong1 = long%%360
+		dlong2 = (long+180)%%360-180
+		if (diff(dlong1) < 0) {
+			return(dlong2)
+		} else {
+			return(dlong1)
+		}
+	}
+
+	#dlong1 = range(long%%360)-180
+	dlong1 = range(long%%360)
 	dlong2 = range((long+180)%%360-180)
 
-	if (diff(dlong1) > 180 && diff(dlong2) > 180) {
+	if (FALSE && diff(dlong1) > 180 && diff(dlong2) > 180) {
 		if (diff(dlong1) > diff(dlong2)) {
 			return(dlong1)
 		} else {

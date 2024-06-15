@@ -3,7 +3,8 @@ import(parallel)
 
 exportClasses(Time,FcTime,ObsTime,Domain,Grid,LAMGrid,GaussGrid)
 
-exportMethods("[","==",length,degrade,initialize,interpgrid,sectioncs,select)
+exportMethods("[","==",length,degrade,initialize,interpgrid,sectioncsgrid,sectiongeogrid,
+	select,zonalmeangrid)
 
-export(area,compass,extendPoints,geoCoords,inDomain,interp,interpAB,rangeLong,sectiongeo,
-	zoom)
+export(area,compass,csLongi,extendPoints,geoCoords,inDomain,interp,interpAB,pole,
+	rangeLong,sectioncs,sectiongeo,stretch,zonalmean,zoom)
