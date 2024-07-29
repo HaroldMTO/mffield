@@ -42,7 +42,6 @@ interp = function(field,grid,method="linear",mc.cores=1)
 	setDataPart(field,data)
 }
 
-
 nextPoint = function(ilon,offgp,nlon)
 {
 	ip = offgp+(ilon%%nlon)+1
@@ -60,9 +59,9 @@ sectioncs = function(field,long=c(0,360),lat=c(-90,90))
 	sectioncsgrid(field,field@grid,long,lat)
 }
 
-zonalmean = function(field)
+zonalmean = function(field,mc.cores=1)
 {
-	zonalmeangrid(field@grid,field)
+	zonalmeangrid(field@grid,field,mc.cores)
 }
 
 interpAB = function(field,eta,method="linear")
@@ -93,6 +92,24 @@ interpAB = function(field,eta,method="linear")
 			}
 
 			data[,i] = d1+e[i]*(d2-d1)
+		}
+	} else if (method == "quad") {
+		data = matrix(nrow=dim(field)[1],ncol=length(eta))
+		dimnames(data)[[2]] = eta
+
+		for (i in seq(along=eta)) {
+			# choose levels for quadratic interp (lrr or llr)
+			if (ind[i] == length(field@eta)-1) {
+				ie = ind[i]+(-1):1
+			} else {
+				ie = ind[i]+0:2
+				if (ind[i] > 1 && diff(range(field@eta[ie])) > diff(range(field@eta[ie-1]))) {
+					ie = ie-1
+				}
+			}
+
+			# Newton's polynom on non regular nodes
+			data[,i] = newtonInterpv(field@eta[ie],field[,ie],eta[i])
 		}
 	} else {
 		stop("method unsupported")

@@ -39,12 +39,6 @@ setGeneric("interpgrid",signature=c("g","grid"),def=function(g,grid,field,method
 }
 )
 
-setGeneric("zonalmean",signature="g",def=function(g,field)
-{
-	standardGeneric("zonalmean")
-}
-)
-
 setGeneric("extendPoints",def=function(grid,x)
 {
 	standardGeneric("extendPoints")
@@ -90,7 +84,7 @@ setGeneric("sectioncsgrid",signature="grid",def=function(field,grid,long,lat)
 }
 )
 
-setGeneric("zonalmeangrid",signature="grid",def=function(grid,field)
+setGeneric("zonalmeangrid",signature="grid",def=function(grid,field,mc.cores)
 {
 	standardGeneric("zonalmeangrid")
 }
@@ -216,7 +210,7 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 		np = length(yfn)
 		indy = which.min(abs(yi-yfn))+seq(-2,2)
 		indy = indy[0 < indy & indy <= np]
-		my[ilat] = mean(yfn[indy])
+		my[ilat] = abs(yi-mean(yfn[indy]))
 
 		# increasing or decreasing point values
 		ind = yfn[-np] <= yi & yi < yfn[-1] | yfn[-1] <= yi & yi < yfn[-np]
@@ -244,18 +238,23 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 		#stopifnot(length(lat) == 1)
 
 		ilat = 1+(which(! is.na(x1))-1)%/%2
-		cat("--> few lats crossing:",length(ilat),length(na.omit(x1)),"\n")
 		if (length(ilat) == 0) {
-			#ilat = which.min(abs(yi-my))
 			ilat = which.min(my)
 		} else if (length(ilat) > 1) {
-			#ilat = ilat[which.min(abs(yi-my[ilat]))]
+			cat("--> few lats crossing:",length(ilat),length(na.omit(x1)),"\n")
 			ilat = ilat[which.min(my[ilat])]
+			cat("--> lat crossing:",ilat,"\n")
 		}
 
-		cat("--> lat crossing:",ilat,"\n")
-		ind = clats[ilat]+seq(grid@nlong[ilat])
-		return(list(longs=xf[ind],lat=lat,data=field[ind,]))
+		ip = clats[ilat]+seq(grid@nlong[ilat])
+		if (diff(x) < 0) {
+			ind =  xf[ip] <= x[2] | xf[ip] >= x[1]
+		} else {
+			ind = x[1] <= xf[ip] & xf[ip] <= x[2]
+		}
+
+		x1 = xf[ip[ind]]
+		data1 = field[ip[ind],]
 	}
 
 	if (all(is.na(x1))) {
@@ -269,7 +268,7 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 		indn = order(xn,na.last=NA)
 		indp = order(xp,na.last=NA)
 		ind = match(c(xp[indp],xn[indn]),x1)
-		ii = which(x[1] <= x1[ind] | x1[ind] <= x[2])
+		ii = which(x1[ind] <= x[2] | x1[ind] >= x[1])
 		cat("--> long:",x1[ind],"\n")
 	} else {
 		ind = order(x1,na.last=NA)
@@ -279,7 +278,8 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 	ind = ind[ii]
 	stopifnot(all(! is.na(x1[ind])))
 
-	dim(data1) = c(2*nlat,dim(field)[2])
+	# not true if x1/data1 have been reset because of few lats
+	if (length(dim(data1)) == 3) dim(data1) = c(2*nlat,dim(field)[2])
 	stopifnot(all(! is.na(data1[ind,1])))
 
 	if (length(long) == 1) {
@@ -290,3 +290,104 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 }
 )
 
+mapdom = function(dom,grid,data,main=NULL,breaks="Sturges",palette="YlOrRd",pch=20,
+	mar=c(2,2,3,5),mgp=c(2,1,0),cex=.6,ppi=72,quiet=FALSE,...)
+{
+	if (ppi > 144) stop("ppi > 144")
+
+	# mar must be set before calling map AND passed to map
+	# (because map resets mar internally and resets it on exit: this is then fake mar!)
+	par(mar=mar,mgp=mgp)
+	l = mapxy(dom,mar=mar,new=TRUE)
+	box()
+
+	h = hist(data,breaks,plot=FALSE)
+
+	f = par("fin")
+	npmax = as.integer(min(prod(f*ppi/(4*cex)),.Machine$integer.max))
+	if (length(data) < npmax/100) {
+		cat("--> very few points, magnify plotting symbol (x2)\n")
+		cex = 2*cex
+	} else if (length(data) > 1.2*npmax) {
+		cex = max(.2,round(cex*sqrt(npmax/length(data)),3))
+		npmax = as.integer(min(prod(f*ppi/(4*cex)),.Machine$integer.max))
+	}
+
+	if (length(data) > 1.2*npmax) {
+		if (! quiet) {
+			cat("--> reducing xy points from",length(data),"to",npmax,"and cex to",cex,"\n")
+		}
+
+		ind = select(grid,npmax)
+
+		b2 = cut(data[ind],h$breaks)
+
+		ilost = which(h$counts > 0 & table(b2) == 0)
+		if (length(ilost) > 0) {
+			b = cut(data,h$breaks)
+			ind1 = which(b %in% levels(b)[ilost])
+			ind = c(ind,ind1)
+			stopifnot(all(! duplicated(ind)))
+			if (! quiet) {
+				cat("--> selecting back",length(ind1),"lost points in",length(ilost),
+					"data bins\n")
+			}
+		}
+
+		grid = grid[ind]
+		data = data[ind]
+	}
+
+	if (cex < .2) cex = .2
+
+	br = h$breaks
+
+	ind = findInterval(data,br,rightmost.closed=TRUE)
+	rev = regexpr("\\+$",palette) < 0
+	cols = hcl.colors(length(br),sub("\\+$","",palette),rev=rev)
+
+	tind = table(ind)
+
+	p = .Last.projection()
+	if (p$projection == "") {
+		for (i in as.integer(names(sort(tind,decreasing=TRUE)))) {
+			ii = which(ind == i)
+			points(grid@long[ii],grid@lat[ii],col=cols[ind[ii]],pch=pch,cex=cex,...)
+		}
+	} else {
+		for (i in as.integer(names(sort(tind,decreasing=TRUE)))) {
+			ii = which(ind == i)
+			mp = mapproject(grid@long[ii],grid@lat[ii])
+			points(mp$x,mp$y,col=cols[ind],pch=pch,cex=cex,...)
+		}
+	}
+
+	levels = sprintf("% .3g",br)
+	if (any(duplicated(levels))) levels = sprintf("% .4g",br)
+	maplegend(levels,col=cols)
+
+	lines(l)
+	title(main)
+}
+
+maplegend = function(breaks,col,...)
+{
+	u = par("usr")
+	p = par("plt")
+
+	width = (1-p[2])/6*diff(u[1:2])/diff(p[1:2])
+	x = u[2]+width/3
+
+	nl = length(breaks)
+	height = diff(u[3:4])
+	dy = height/(nl-1)
+	y = u[3]
+	ybas = y + dy*(seq(nl-1)-1)
+	yhaut = ybas + dy
+
+	rect(x,ybas,x+width,yhaut,col=col,border=NA,xpd=TRUE)
+
+	op = par(las=2,yaxt="s")
+	axis(4,c(ybas[1],yhaut),breaks,tick=FALSE,pos=x+width/12,mgp=c(1,.7,0),...)
+	par(op)
+}

@@ -44,24 +44,23 @@ rangeLong = function(long)
 		if (diff(dlong1) < 0) {
 			return(dlong2)
 		} else {
-			return(dlong1)
+			return((dlong1+180)%%360-180)
 		}
 	}
 
-	#dlong1 = range(long%%360)-180
 	dlong1 = range(long%%360)
 	dlong2 = range((long+180)%%360-180)
 
 	if (FALSE && diff(dlong1) > 180 && diff(dlong2) > 180) {
 		if (diff(dlong1) > diff(dlong2)) {
-			return(dlong1)
+			return((dlong1+180)%%360-180)
 		} else {
 			return(dlong2)
 		}
 	}
 
 	if (diff(dlong1) <= diff(dlong2)) {
-		return(dlong1)
+		return((dlong1+180)%%360-180)
 	} else {
 		return(dlong2)
 	}
@@ -85,4 +84,26 @@ inDomain = function(grid,domain)
 area = function(dom1,dom2)
 {
 	diff(dom1@xlim)*diff(dom1@ylim)/(diff(dom2@xlim)*diff(dom2@ylim))
+}
+
+#setMethod("map","Domain",def=mapxy)
+mapxy = function(dom,xlim=dom@xlim,ylim=dom@ylim,...)
+{
+	if (dom@proj == "-") {
+		l = map(xlim=xlim,ylim=ylim,...)
+		p = .Last.projection()
+		if (p$projection != "") {
+			cat("--> reset projection\n")
+			p = .Last.projection(list(projection="",parameters=NULL,orientation=NULL))
+			stopifnot(p$projection == "")
+		}
+
+		# axes for rectangular projection only
+		axis(1)
+		axis(2)
+	} else {
+		l = map(projection=dom@proj,parameters=dom@param,xlim=xlim,ylim=ylim,...)
+	}
+
+	invisible(l)
 }

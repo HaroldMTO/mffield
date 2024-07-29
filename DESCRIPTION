@@ -10,6 +10,7 @@ Description: Classes and functions for representing 2D and 3D NWP fields. Fields
  forecast or climatological fields. The spatial dimension is made of a horizontal
  component and a vertical axis.
 License: no license
-Depends: methods, parallel
-Collate: TimeClass.R FcTimeClass.R DomainClass.R GridClass.R LAMGridClass.R
- GaussGridClass.R FieldClass.R ObsTimeClass.R fa.R
+Depends: methods
+Imports: parallel, geosphere, maps, mapproj
+Collate: math.R TimeClass.R FcTimeClass.R DomainClass.R GridClass.R LAMGridClass.R
+ GaussGridClass.R FieldClass.R ObsTimeClass.R

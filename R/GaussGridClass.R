@@ -92,6 +92,26 @@ stretch = function(lat,stretch)
 	theta
 }
 
+unstretch = function(lat,stretch)
+{
+	if (stretch == 1) return(lat)
+
+	stopifnot(stretch > 0)
+
+	C2 = stretch^2
+	mu = sin(lat*pi/180)
+	sinla = ((C2+1)*mu+1-C2)/((1-C2)*mu+C2+1)
+	theta = asin(sinla)*180/pi
+	stopifnot(all(theta < lat))
+
+	theta
+}
+
+csLat = function(nlat)
+{
+	90*(1-2*(seq(nlat)-.5)/nlat)
+}
+
 csLong = function(grid)
 {
 	nlat = length(grid@nlong)
@@ -134,16 +154,23 @@ compass = function(grid)
       sqmu2 = sqrt(1-mu^2)
       a = 1/(c2+1+(c2-1)*mu)
       b = c2-1+(c2+1)*mu
+      ccos = 2*C*sqmu2
+      bcos = b*sqm2
 
       nlon = grid@nlong[ilat]
       cslon = csLongi(nlon)
       csx = cos(cslon)
       csy = sin(cslon)
-      ca1 = a*(2*C*mucen*sqmu2-b*sqm2*csx)
-      gemu = a*(2*C*sqm2*sqmu2*csx+b*mucen)
+		#ca1 = rotx(ccos,b,mucen,sqm2*csx)
+		#gemu = roty(ccos,b,mucen,sqm2*csx)
+      ca1 = a*(ccos*mucen-b*sqm2*csx)
+      gemu = a*(ccos*sqm2*csx+b*mucen)
+		stopifnot(all(abs(gemu) <= 1))
+
       rcoslat = 1/sqrt(1-gemu^2)
-      l[clats[ilat]+1:nlon] = -sqm2*csy*rcoslat
-      m[clats[ilat]+1:nlon] = ca1*rcoslat
+		ip = clats[ilat]+1:nlon
+      l[ip] = -sqm2*csy*rcoslat
+      m[ip] = ca1*rcoslat
    }
 
    data.frame(l=l,m=m)
@@ -159,7 +186,7 @@ roty = function(x,y,p,q)
    x*q+y*p
 }
 
-geoCoords = function(grid)
+geoCoord = function(grid)
 {
    nlat = length(grid@nlong)
    mucen = grid@pole[1]
@@ -174,8 +201,7 @@ geoCoords = function(grid)
    xp = cos(locen)
    yp = sin(locen)
 
-   npdg = sum(grid@nlong)
-   gelat = gelam = numeric(npdg)
+   gelat = gelam = numeric(sum(grid@nlong))
 
    for (ilat in seq(nlat)) {
       mu = sin(pi/180*grid@theta[ilat])
@@ -188,10 +214,11 @@ geoCoords = function(grid)
 
       nlon = grid@nlong[ilat]
       cslon = csLongi(nlon)
+		#stopifnot(all.equal(cslon[1:(nlon/2)],cslon[-(1:(nlon/2))]-pi))
       csx = cos(cslon)
       csy = sin(cslon)
       gemu = a*(ccos*sqm2*csx+b*mucen)
-		stopifnot(all(abs(gemu) <= 1))
+		stopifnot(all(abs(gemu) < 1))
 
       gelat[clats[ilat]+1:nlon] = 180/pi*asin(gemu)
       loloc = rotx(mucen*csx,csy,xp,yp)
@@ -199,14 +226,16 @@ geoCoords = function(grid)
 		d = a/sqrt(1-gemu^2)
       geclo = d*(bcos*xp-ccos*loloc)
       geslo = d*(bcos*yp-ccos*lolos)
-      sc = sign(geclo)
-      c1 = min(sc,0)
-      s2 = 2*min(sign(geslo),0)
-      gelam[clats[ilat]+1:nlon] = 180/pi*(sc*asin(geclo)-pi*(c1+s2*(1+c1)))
+		geslo = pmax(-1,pmin(geslo,1))
 
-		# reset long to 0 on poles
-		ind = which(abs(gemu) == 1)
-		gelam[clats[ilat]+ind] = 0
+      sc = sign(geclo)
+      c1 = pmin(sc,0)
+      s1 = pmin(sign(geslo),0)
+		lambda = sc*asin(geslo)-pi*(c1+2*s1*(1+c1))
+		i0 = which(sc == 0)
+		lambda[i0] = asin(geslo[i0])-2*pi*s1
+
+      gelam[clats[ilat]+1:nlon] = 180/pi*lambda
    }
 
 	if (any(gelam < 0 | gelam >= 360)) {
@@ -223,7 +252,7 @@ setMethod("select","GaussGrid",def=function(grid,npmax)
 
 	# note: 1 is trivial
 	for (nbin in 2:20) {
-      np = npdg%/%nbin
+      np = sum(grid@nlong)%/%nbin
       ind = unlist(sapply(1:nbin,function(k) (k-1)*np+seq(1,np,by=nbin+1-k)))
       if (length(ind) <= npmax) break
    }
@@ -291,7 +320,7 @@ ig = function(g,grid,field,method)
 		interp1dfun = interp1d0
 		interpfun = interp0
 	} else {
-		stop("unsupported method")
+		stop("unknown interpolation method")
 	}
 
 	theta2 = stretch(grid@theta,grid@stretch)
@@ -348,13 +377,13 @@ ig = function(g,grid,field,method)
 	data
 }
 
-interplat = function(ilat,g,grid,cs,clats,clato,dlono,theta2,thetao2,interp1dfun,
+interplat = function(ilat,nlong,cs,clats,nlongo,clato,dlono,thetao2,interp1dfun,
 	interpfun,field)
 {
-	nlato = length(g@nlong)
-	data = array(dim=c(grid@nlong[ilat],dim(field)[2]))
+	nlato = length(nlongo)
+	data = array(dim=c(nlong[ilat],dim(field)[2]))
 
-	for (i in seq(grid@nlong[ilat])) {
+	for (i in seq(nlong[ilat])) {
 		ip = clats[ilat]+i
 		if (cs$lat[ip] >= thetao2[1]) {
 			ilato = 1
@@ -364,30 +393,30 @@ interplat = function(ilat,g,grid,cs,clats,clato,dlono,theta2,thetao2,interp1dfun
 
 		e1 = cs$long[ip]/dlono[ilato]
 		ilono1 = floor(e1)+1
-		stopifnot(0 < ilono1 && ilono1 <= g@nlong[ilato])
+		stopifnot(0 < ilono1 && ilono1 <= nlongo[ilato])
 		e1 = e1-(ilono1-1)
 		stopifnot(0 <= e1 && e1 < 1)
 
 		# North from 1st lat or south from last lat (ie ilat = nlat)
 		if (cs$lat[ip] >= thetao2[1] || ilato == nlato) {
-			data[ip,] = interp1dfun(field,clato,ilato,ilono1,e1)
+			data[i,] = interp1dfun(field,clato,ilato,ilono1,e1)
 			next
 		}
 
 		e0 = (thetao2[ilato]-cs$lat[ip])/(thetao2[ilato]-thetao2[ilato+1])
 		stopifnot(0 <= e0 && e0 < 1)
 		if (e0 == 0) {
-			data[ip,] = interp1dfun(field,clato,ilato,ilono1,e1)
+			data[i,] = interp1dfun(field,clato,ilato,ilono1,e1)
 			next
 		}
 
 		e2 = cs$long[ip]/dlono[ilato+1]
 		ilono2 = floor(e2)+1
-		stopifnot(0 < ilono2 && ilono2 <= g@nlong[ilato+1])
+		stopifnot(0 < ilono2 && ilono2 <= nlongo[ilato+1])
 		e2 = e2-(ilono2-1)
 		stopifnot(0 <= e2 && e2 < 1)
 
-		data[ip,] = interpfun(field,clato,ilato,ilono1,ilono2,e0,e1,e2)
+		data[i,] = interpfun(field,clato,ilato,ilono1,ilono2,e0,e1,e2)
 	}
 
 	data
@@ -395,13 +424,6 @@ interplat = function(ilat,g,grid,cs,clats,clato,dlono,theta2,thetao2,interp1dfun
 
 igpoint = function(g,grid,field,method,mc.cores)
 {
-	library(parallel)
-
-	# consider the cs grid as a geo grid
-	stopifnot(g@pole[1] == 1 && g@pole[2] == 0)
-
-	nlato = length(g@nlong)
-
 	if (method == "linear") {
 		interp1dfun = interp1d1
 		interpfun = interp1
@@ -409,14 +431,26 @@ igpoint = function(g,grid,field,method,mc.cores)
 		interp1dfun = interp1d0
 		interpfun = interp0
 	} else {
-		stop("unsupported method")
+		stop("unknown interpolation method")
 	}
 
-	theta2 = stretch(grid@theta,grid@stretch)
 	thetao2 = stretch(g@theta,g@stretch)
 
-	# find the geo coords, considered as cs coords in a geo grid (nsttyp=1)
-	cs = geoCoords(grid)
+	if (g@pole[1] == 1 && g@pole[2] == 0) {
+		# consider the cs grid as a geo grid
+
+		# find the geo coords, considered as cs coords in a geo grid (nsttyp=1)
+		cs = geoCoord(grid)
+	} else if (grid@pole[1] == 1 && grid@pole[2] == 0) {
+		# find the CS coords
+		p = rev(pole(g))
+		cs = csCoord(p,g@stretch,grid@long,grid@lat)
+
+		# stretch lats again since we work in stretched lats
+		cs$lat = stretch(cs$lat,g@stretch)
+	} else {
+		stop("no geographic grid")
+	}
 
 	data = matrix(nrow=sum(grid@nlong),ncol=dim(field)[2])
 	dimnames(data) = list(NULL,dimnames(field)[[2]])
@@ -425,20 +459,53 @@ igpoint = function(g,grid,field,method,mc.cores)
 	clato = c(0,cumsum(g@nlong))
 	dlono = 360/g@nlong
 
-	ldata = mclapply(seq(along=grid@nlong),interplat,g,grid,cs,clats,clato,dlono,
-		theta2,thetao2,interp1dfun,interpfun,field,mc.preschedule=FALSE,mc.cores=mc.cores)
-	#for (ilat in seq(along=grid@nlong)) {
-	#	ip = clats[ilat]+seq(grid@nlong[ilat])
-	#	data[ip,] = interplat(ilat,g,grid,cs,clats,clato,dlono,theta2,thetao2,field)
-	#}
+	if (mc.cores > 1) {
+		lc = list()
+		for (ilat in seq(along=grid@nlong)) {
+			n = length(lc)+1
+			lc[[n]] = mcparallel(interplat(ilat,grid@nlong,cs,clats,g@nlong,clato,dlono,
+				thetao2,interp1dfun,interpfun,field))
+			if (ilat == length(grid@nlong) || n == mc.cores) {
+				ld = mccollect(lc)
+				try(parallel:::mckill(lc,15),silent=TRUE)
+				for (k in 1:n) {
+					ip = clats[ilat-n+k]+seq(grid@nlong[ilat-n+k])
+					data[ip,] = ld[[k]]
+				}
 
-	data = array(dim=c(sum(grid@nlong),dim(field)[2]))
-	for (ilat in seq(along=grid@nlong)) {
-		ip = clats[ilat]+seq(grid@nlong[ilat])
-		data[ip,] = ldata[[ilat]]
+				rm(lc,ld)
+				lc = list()
+			}
+		}
+	} else {
+		for (ilat in seq(along=grid@nlong)) {
+			ip = clats[ilat]+seq(grid@nlong[ilat])
+			data[ip,] = interplat(ilat,grid@nlong,cs,clats,g@nlong,clato,dlono,thetao2,
+				interp1dfun,interpfun,field)
+		}
 	}
 
 	data
+}
+
+csCoord = function(pole,stretch,lon,lat)
+{
+	library(geosphere)
+
+	lon = (lon+180)%%360-180
+
+	ll = matrix(c(lon,lat),ncol=2)
+	theta2 = distCosine(pole,ll,r=1)
+	stopifnot(theta2 <= pi)
+
+	theta2=90-180/pi*theta2
+	theta = unstretch(theta2,stretch)
+
+	# shift 180 is needed because CS grid is 180 rotated (ie 0 in CS = -180 in geo)
+	lambda = bearing(pole,ll,a=1,f=0)
+	stopifnot(all(abs(lambda) <= 180))
+
+	data.frame(lat=theta,long=(360-lambda)%%360)
 }
 
 igeopoint = function(g,grid,field,method)
@@ -454,7 +521,7 @@ igeopoint = function(g,grid,field,method)
 	stopifnot(all(diff(thetao2) < 0))
 
 	# find the geo coords, considered as cs coords in a geo grid (nsttyp=1)
-	csg = geoCoords(g)
+	csg = geoCoord(g)
 
 	data = matrix(0,nrow=sum(grid@nlong),ncol=dim(field)[2])
 	dimnames(data) = list(NULL,dimnames(field)[[2]])
@@ -522,11 +589,13 @@ setMethod("interpgrid",signature(g="GaussGrid",grid="GaussGrid"),
 	if (all(grid@pole == g@pole)) {
 		data = ig(g,grid,field,method)
 	} else if (all(g@pole == c(1,0))) {
-		cat("--> interpolation from a geo. grid to a CS grid\n")
+		cat("--> interpolation from a geo. grid to a CS grid - cores:",mc.cores,"\n")
 		data = igpoint(g,grid,field,method,mc.cores)
 	} else if (all(grid@pole == c(1,0))) {
-		cat("--> interpolation from a CS grid to a geo grid: geoproject\n")
-		data = igeopoint(g,grid,field,method)
+		#cat("--> interpolation from a CS grid to a geo grid: geoproject\n")
+		#data = igeopoint(g,grid,field,method)
+		cat("--> interpolation from a CS grid to a geo grid - cores:",mc.cores,"\n")
+		data = igpoint(g,grid,field,method,mc.cores)
 	} else {
 		cat("--> interpolation from a CS grid to a CS grid: geoproject + CSinterpolate\n")
 		# create the equivalent geo grid
@@ -552,26 +621,52 @@ setMethod("interpgrid",signature(g="GaussGrid",grid="GaussGrid"),
 }
 )
 
-setMethod("zonalmeangrid",signature("GaussGrid"),def=function(grid,field)
+setMethod("zonalmeangrid",signature("GaussGrid"),def=function(grid,field,mc.cores)
 {
 	nlat = length(grid@nlong)
 	data = matrix(nrow=nlat,ncol=dim(field)[2])
-	dimnames(data)[[2]] = dimnames(f)[[2]]
+	dimnames(data) = dimnames(field)
 
 	clats = c(0,cumsum(grid@nlong))
 
 	if (grid@pole[1] == 1) {
 		for (ilat in seq(nlat)) {
 			ip = clats[ilat]+seq(grid@nlong[ilat])
-			data[ilat,] = apply(field[ip,,drop=FALSE],2,mean)
+			data[ilat,] = colMeans(field[ip,,drop=FALSE])
 		}
 	} else {
-		# among lats, find for the same geo theta as the unstretched cs theta
-		geolat = c(sort(grid@theta),90)
-		ind = findInterval(grid@lat,geolat,all.inside=TRUE)
+		# among lats, find the same geo theta as the unstretched cs theta
+		geolat = c(-90,sort(csLat(nlat-1)))
+		ind = findInterval(grid@lat,geolat)
 		stopifnot(all(0 < ind & ind <= nlat))
 
-		for (ilat in seq(nlat)) data[ilat,] = apply(field[ind==ilat,,drop=FALSE],2,mean)
+		if (mc.cores > 1) {
+			lc = list()
+			for (i in seq(nlat)) {
+				n = length(lc)+1
+				lc[[n]] = mcparallel(colMeans(field[ind == i,,drop=FALSE]))
+				if (i == nlat || n == mc.cores) {
+					ld = mccollect(lc)
+					try(parallel:::mckill(lc,15),silent=TRUE)
+					for (k in 1:n) data[ilat-n+k,] = ld[[k]]
+					rm(lc,ld)
+					lc = list()
+				}
+			}
+		} else {
+			for (ilat in seq(nlat)) {
+				data[ilat,] = colMeans(field[ind == ilat,,drop=FALSE])
+			}
+		}
+
+		# avoid missing data at small intervals (poles, mainly)
+		if (all(ind > 1)) data[1,] = data[2,]
+		if (all(ind < nlat)) data[nlat,] = data[nlat-1,]
+		ina = which(! seq(2,nlat-1) %in% ind)
+		if (length(ina) > 0) {
+			if (length(ina) > 1) stopifnot(all(diff(ina) > 1))
+			for (i in ina) data[i+1,] = (data[i,]+data[i+2,])/2
+		}
 	}
 
 	data
@@ -584,37 +679,49 @@ ddiffn = function(x,y,n,yprev)
 	if (n == 0) {
 		return(y)
 	} else if (n == 1) {
-		return(diff(y[1:2])/diff(x[1:2]))
+		return((y[,2]-y[,1])/diff(x[1:2]))
 	}
 
 	if (missing(yprev)) {
-		yx1 = ddiffn(x[-(n+1)],y[-(n+1)],n-1)
+		yx1 = ddiffn(x[-(n+1)],y[,-(n+1)],n-1)
 	} else {
 		yx1 = yprev
 	}
 
-	yx2 = ddiffn(x[-1],y[-1],n-1)
+	yx2 = ddiffn(x[-1],y[,-1],n-1)
 	(yx2-yx1)/(x[n+1]-x[1])
 }
 
 # Newton's polynom (or Newton's form of the Lagrange polynom)
-Pn = function(x,y,n,xh)
+Pn = function(x,y,xh)
 {
-	yprev = y
-	for (i in (1:n)+1) yprev[i] = ddiffn(x[1:i],y[1:i],i-1,yprev[i-1])
+	if (! is.matrix(y)) y = t(y)
 
-	yprev = yprev[-1]
+	yprev = y
+	for (i in seq(along=x)[-1]) yprev[,i] = ddiffn(x[1:i],y[,1:i],i-1,yprev[,i-1])
+
+	yprev = yprev[,-1]
 	if (missing(xh)) return(yprev)
 
-	y[1]+sum(sapply(1:n,function(i) yprev[i]*prod(xh-x[1:i])))
+	stopifnot(length(xh) == 1)
+	y[,1]+sum(sapply(seq(along=x)[-length(x)],function(i) yprev[,i]*prod(xh-x[1:i])))
 }
 
-dprodf = function(x,xh)
+dprodfreg = function(x,xh)
 {
 	if (length(x) == 1) return(1)
 
-	# sum of Lagrange polynoms (li = prod(x-xj) with j!=), really?
-	sum(sapply(seq(along=x),function(j) prod(xh-x[-j])))
+	# sum of Lagrange polynoms (li = prod(x-xj) with j!=i), really?
+	sum(sapply(seq(along=x),function(i) prod(xh-x[-i])))
+}
+
+dprodf = function(x,y,xh)
+{
+	if (length(x) == 1) return(y)
+
+	if (! is.matrix(y)) y = t(y)
+	# sum of Lagrange polynoms (li = prod(x-xj) with j!=i), really?
+	rowSums(sapply(seq(along=x),function(i) y[,i]*prod((xh-x[-i])/(x[i]-x[-i]))))
 }
 
 dPn = function(x,y,n,xh)
@@ -622,7 +729,7 @@ dPn = function(x,y,n,xh)
 	newt = Pn(x,y,n)
 
 	# derivative of Newton's polynom?
-	sum(sapply(1:n,function(i) newt[i]*dprodf(x[1:i],xh)))
+	sum(sapply(1:n,function(i) newt[i]*dprodfreg(x[1:i],xh)))
 }
 
 gradl = function(data,grid,method="newton",mc.cores=1)
@@ -649,9 +756,9 @@ gradl = function(data,grid,method="newton",mc.cores=1)
 			m = t(matrix(c(ip0,ip1,ip,ip3,ip4),ncol=5))
 
 			for (j in seq(dim(data)[2])) {
-				a = mclapply(seq(dim(m)[2]),function(k) dPn(1:5,data[m[,k],j],4,3),
+				lc = mclapply(seq(dim(m)[2]),function(k) dPn(1:5,data[m[,k],j],4,3),
 					mc.cores=mc.cores)
-				datal[ip,j] = simplify2array(a)
+				datal[ip,j] = simplify2array(lc)
 			}
 		} else {
 			dlon = abs(diff(grid@long[ip[1:2]]))
@@ -733,4 +840,3 @@ setMethod("sectioncsgrid",signature(grid="GaussGrid"),
 	}
 }
 )
-

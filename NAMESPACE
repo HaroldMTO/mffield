@@ -1,10 +1,12 @@
 import(methods)
 import(parallel)
+import(geosphere)
 
 exportClasses(Time,FcTime,ObsTime,Domain,Grid,LAMGrid,GaussGrid)
 
 exportMethods("[","==",length,degrade,initialize,interpgrid,sectioncsgrid,sectiongeogrid,
 	select,zonalmeangrid)
 
-export(area,compass,csLongi,extendPoints,geoCoords,inDomain,interp,interpAB,pole,
-	rangeLong,sectioncs,sectiongeo,stretch,zonalmean,zoom)
+export(area,compass,csCoord,csLat,csLongi,extendPoints,geoCoord,inDomain,interp,interpAB,
+	mapdom,mapxy,maplegend,pole,rangeLong,sectioncs,sectiongeo,stretch,unstretch,zonalmean,
+	zoom)
