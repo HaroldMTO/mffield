@@ -107,9 +107,19 @@ unstretch = function(lat,stretch)
 	theta
 }
 
-csLat = function(nlat)
+equiLat = function(nlat)
 {
 	90*(1-2*(seq(nlat)-.5)/nlat)
+}
+
+csLat = function(grid)
+{
+	nlat = length(grid@nlong)
+	clats = c(0,cumsum(grid@nlong[-nlat]))
+	lon1 = grid@long[clats+1]
+	lat1 = grid@lat[clats+1]
+	cs1 = csCoord(rev(pole(grid)),grid@stretch,lon1,lat1)
+	cs1$lat
 }
 
 csLong = function(grid)
@@ -251,9 +261,15 @@ setMethod("select","GaussGrid",def=function(grid,npmax)
 	if (length(grid) <= npmax) return(seq(length(grid)))
 
 	# note: 1 is trivial
+	ngp = sum(grid@nlong)
+
 	for (nbin in 2:20) {
-      np = sum(grid@nlong)%/%nbin
-      ind = unlist(sapply(1:nbin,function(k) (k-1)*np+seq(1,np,by=nbin+1-k)))
+		# +1 so that ngp is never met in i1
+		np = ngp%/%nbin+1
+      i1 = c(seq(1,ngp,by=np),ngp)
+		stopifnot(length(i1) == nbin+1)
+      lind = sapply(1:nbin,function(k) seq(i1[k],i1[k+1],by=nbin+1-k))
+		ind = unlist(lind)
       if (length(ind) <= npmax) break
    }
 
@@ -636,16 +652,16 @@ setMethod("zonalmeangrid",signature("GaussGrid"),def=function(grid,field,mc.core
 		}
 	} else {
 		# among lats, find the same geo theta as the unstretched cs theta
-		geolat = c(-90,sort(csLat(nlat-1)))
+		geolat = c(-90,rev(equiLat(nlat-1)))
 		ind = findInterval(grid@lat,geolat)
 		stopifnot(all(0 < ind & ind <= nlat))
 
 		if (mc.cores > 1) {
 			lc = list()
-			for (i in seq(nlat)) {
+			for (ilat in seq(nlat)) {
 				n = length(lc)+1
-				lc[[n]] = mcparallel(colMeans(field[ind == i,,drop=FALSE]))
-				if (i == nlat || n == mc.cores) {
+				lc[[n]] = mcparallel(colMeans(field[ind == ilat,,drop=FALSE]))
+				if (ilat == nlat || n == mc.cores) {
 					ld = mccollect(lc)
 					try(parallel:::mckill(lc,15),silent=TRUE)
 					for (k in 1:n) data[ilat-n+k,] = ld[[k]]
@@ -673,23 +689,19 @@ setMethod("zonalmeangrid",signature("GaussGrid"),def=function(grid,field,mc.core
 }
 )
 
-# divided difference of order n (recursive computation)
-ddiffn = function(x,y,n,yprev)
+# divided difference of order n-1 (recursive computation)
+ddiffn = function(x,y,n,y1,y2)
 {
-	if (n == 0) {
+	if (n == 1) {
 		return(y)
-	} else if (n == 1) {
+	} else if (n == 2) {
 		return((y[,2]-y[,1])/diff(x[1:2]))
 	}
 
-	if (missing(yprev)) {
-		yx1 = ddiffn(x[-(n+1)],y[,-(n+1)],n-1)
-	} else {
-		yx1 = yprev
-	}
+	if (missing(y1)) y1 = ddiffn(x[-n],y[,-n],n-1)
+	if (missing(y2)) y2 = ddiffn(x[-1],y[,-1],n-1)
 
-	yx2 = ddiffn(x[-1],y[,-1],n-1)
-	(yx2-yx1)/(x[n+1]-x[1])
+	(y2-y1)/(x[n]-x[1])
 }
 
 # Newton's polynom (or Newton's form of the Lagrange polynom)
@@ -697,8 +709,12 @@ Pn = function(x,y,xh)
 {
 	if (! is.matrix(y)) y = t(y)
 
-	yprev = y
-	for (i in seq(along=x)[-1]) yprev[,i] = ddiffn(x[1:i],y[,1:i],i-1,yprev[,i-1])
+	y1 = y[,1]
+	y2 = y[,2]
+	for (i in seq(along=x)[-1]) {
+		y1 = ddiffn(x[1:i],y[,1:i],i,y1)
+		y2 = ddiffn(x[1:i],y[,1:i],i,y2)
+	}
 
 	yprev = yprev[,-1]
 	if (missing(xh)) return(yprev)

@@ -1,10 +1,21 @@
-setClass("Field",representation(grid="Grid",eta="numeric"),contains="array",
+setClass("Field",representation(grid="Grid",eta="numeric",ind="integer"),contains="array",
 	validity=function(object)
 {
+	if (length(object@ind) > 0) {
+		if (any(is.na(object@ind))) return("ind NA")
+		if (any(is.infinite(object@ind))) return("ind Inf")
+		if (any(object@ind <= 0)) return("ind <= 0")
+	}
+
 	if (length(object@.Data) > 1) {
-		npdg = length(object@grid)
 		nlev = length(object@eta)
-		if (length(object@.Data) != npdg*nlev) return("dim(data) != [grid,eta]")
+		if (length(object@ind) == 0) {
+			npdg = length(object@grid)
+			if (length(object@.Data) != npdg*nlev) return("dim(data) != [grid,eta]")
+		} else {
+			npdg = length(object@ind)
+			if (length(object@.Data) != npdg*nlev) return("dim(data) != [ind,eta]")
+		}
 
 		if (! is.null(dim(object@.Data))) {
 			if (! npdg %in% dim(object@.Data)) return("dim(data) inconsistent with pdg")
@@ -22,17 +33,17 @@ setClass("Field",representation(grid="Grid",eta="numeric"),contains="array",
 zoom = function(field,domain)
 {
 	# full grid only
-	stopifnot(length(field@grid@ind) == 0)
+	stopifnot(length(field@ind) == 0)
 
 	ind = inDomain(field@grid,domain)
 	if (all(ind)) return(field)
 
-	g = field@grid[ind]
-	if (diff(domain@xlim) < 360) g = as(g,"LAMGrid")
-	g@ind = which(ind)
-	field@grid = g
+	#g = field@grid[ind]
+	#if (diff(domain@xlim) < 360) g = as(g,"LAMGrid")
+	#g@ind = which(ind)
+	field@ind = which(ind)
 
-	setDataPart(field,field[ind,,drop=FALSE])
+	setDataPart(field,field[field@ind,,drop=FALSE])
 }
 
 interp = function(field,grid,method="linear",mc.cores=1)
@@ -67,8 +78,9 @@ zonalmean = function(field,mc.cores=1)
 interpAB = function(field,eta,method="linear")
 {
 	ind = findInterval(eta,field@eta)
-	stopifnot(all(0 < ind & ind < length(field@eta)))
+	stopifnot(all(0 < ind & ind <= length(field@eta)))
 	e = (eta-field@eta[ind])/(field@eta[ind+1]-field@eta[ind])
+	if (any(ind == length(field@eta))) e[ind == length(field@eta)] = 0
 	stopifnot(all(0 <= e & e < 1))
 
 	if (method == "ppp") {
@@ -98,6 +110,11 @@ interpAB = function(field,eta,method="linear")
 		dimnames(data)[[2]] = eta
 
 		for (i in seq(along=eta)) {
+			if (e[i] < 1.e-4) {
+				data[,i] = field[,ind[i]]
+				next
+			}
+
 			# choose levels for quadratic interp (lrr or llr)
 			if (ind[i] == length(field@eta)-1) {
 				ie = ind[i]+(-1):1

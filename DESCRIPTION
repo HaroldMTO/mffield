@@ -12,5 +12,5 @@ Description: Classes and functions for representing 2D and 3D NWP fields. Fields
 License: no license
 Depends: methods
 Imports: parallel, geosphere, maps, mapproj
-Collate: math.R TimeClass.R FcTimeClass.R DomainClass.R GridClass.R LAMGridClass.R
- GaussGridClass.R FieldClass.R ObsTimeClass.R
+Collate: math.R TimeClass.R FcTimeClass.R ObsTimeClass.R DomainClass.R GridClass.R
+ LAMGridClass.R GaussGridClass.R FieldClass.R

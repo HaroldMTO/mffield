@@ -1,4 +1,4 @@
-setClass("Grid",representation(lat="numeric",long="numeric",ind="integer"),
+setClass("Grid",representation(lat="numeric",long="numeric"),
 	validity=function(object)
 {
 	if (length(object@lat) != length(object@long)) return("length(lat) != length(long)")
@@ -10,12 +10,6 @@ setClass("Grid",representation(lat="numeric",long="numeric",ind="integer"),
 	if (any(is.na(object@long))) return("long NA")
 	if (any(is.infinite(object@long))) return("long Inf")
 	if (any((object@long+180)%%360 != object@long+180)) return("long out of [-180,180[")
-
-	if (length(object@ind) > 0) {
-		if (any(is.na(object@ind))) return("ind NA")
-		if (any(is.infinite(object@ind))) return("ind Inf")
-		if (any(object@ind <= 0)) return("ind <= 0")
-	}
 
 	return(TRUE)
 }
@@ -290,84 +284,167 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 }
 )
 
-mapdom = function(dom,grid,data,main=NULL,breaks="Sturges",palette="YlOrRd",pch=20,
-	mar=c(2,2,3,5),mgp=c(2,1,0),cex=.6,ppi=72,quiet=FALSE,...)
+prettyBreaks = function(x,breaks="Sturges",nmin=5,n=8,crop=FALSE,split=FALSE)
+{
+   h = hist(x,breaks,plot=FALSE)
+
+   if (is.character(breaks)) {
+      stopifnot(1 < nmin && nmin <= n)
+
+      have = h$counts > 0
+      nbin = length(h$counts)
+
+      # case for binary values (e.g. 0/1): 2 non-empty bins that are the extreme ones
+      if (length(which(have)) == 2 && all(which(have) %in% c(1,nbin))) {
+         if (nbin > 2) {
+            h = hist(x,2,plot=FALSE)
+            if (length(h$counts) > 2) {
+					cat("--> failed to limit (extreme) bins to 2:",length(h$counts),nbin,"\n")
+				}
+         }
+      } else if (nbin > 1.5*n) {
+         h = hist(x,n,plot=FALSE)
+
+         # still too many bins: try n-1
+         if (length(h$counts) > 1.5*n && length(which(h$counts > 0)) > 2) {
+            h = hist(x,n-1,plot=FALSE)
+			}
+
+         if (length(h$counts) > 1.5*n && length(which(h$counts > 0)) > 2) {
+           cat("--> failed to limit bins from",length(which(have)),nbin,"to",n,":",
+               length(h$counts),"\n")
+         }
+      }
+
+      if (length(which(h$counts > 0)) > 2 && length(h$counts) < nmin) {
+         hh = hist(x,nmin,plot=FALSE)
+         cat("--> too few bins, try minimum of",nmin,"bins:",length(hh$counts),"\n")
+         # yes, 0s can be fewer with more bins...
+         if (length(which(hh$counts == 0)) <= length(which(h$counts == 0))) h = hh
+      }
+   }
+
+   if (split && length(h$counts) > 2) {
+      indx = order(h$density,decreasing=TRUE)
+      dy = diff(h$density[indx])
+      ix = which.min(dy)
+      if (length(which(h$counts > 0)) > 1 && ix < length(which(h$density > 0)) &&
+         (r=h$density[indx[ix]]/h$density[indx[ix+1]]) > 3*ix) {
+         # n is 3, 4 or 5 (ie 2, 3 or 4)
+         nb = 1+min(4,as.integer(sqrt(r/(3*ix))+1))
+         br = seq(h$breaks[indx[1]],h$breaks[indx[1]+1],length.out=nb)
+         if (nb > 3) cat("--> splitting bin",ix,"/",length(h$counts),"into",nb,"\n")
+         h = hist(x,unique(sort(c(h$breaks,br))),plot=FALSE)
+      }
+   }
+
+   nb = length(h$breaks)
+
+   xn = min(x,na.rm=TRUE)
+   xx = max(x,na.rm=TRUE)
+
+   # fix extreme breaks that may not strictly encompass extreme values
+   if (is.finite(xn) && xn < h$breaks[1]) h$breaks[1] = xn
+   if (is.finite(xx) && xx > h$breaks[nb]) h$breaks[nb] = xx
+
+   if (length(h$counts) > 2) {
+      if (crop) {
+         br = h$breaks
+         dxn = diff(br[1:2])
+         dxx = diff(br[-(1:(nb-2))])
+         # crop the extreme bins by 1/5-th of their width or by their half width
+         if (xn > br[2]-dxn/5 && xx < br[nb-1]+dxx/5) {
+            h$breaks[1] = br[2]-dxn/5
+            h$breaks[nb] = br[nb-1]+dxx/5
+         } else if (xn > br[2]-dxn/2 && xx < br[nb-1]+dxx/2) {
+            h$breaks[1] = br[2]-dxn/2
+            h$breaks[nb] = br[nb-1]+dxx/2
+         }
+      }
+
+      # values in last bin are stuck to left bound (if right=F, may be?)
+      if (h$breaks[length(h$breaks)-1] == xx) {
+         cat("--> suppress last bin (empty)",length(h$breaks),h$counts[length(h$counts)],
+				"\n")
+         h = hist(x,h$breaks[-length(h$breaks)])
+      }
+   }
+
+   h
+}
+
+mappoints = function(grid,ind,data,palette="YlOrRd",pch=20,cex=.6,ppi=72,quiet=FALSE,...)
 {
 	if (ppi > 144) stop("ppi > 144")
 
-	# mar must be set before calling map AND passed to map
-	# (because map resets mar internally and resets it on exit: this is then fake mar!)
-	par(mar=mar,mgp=mgp)
-	l = mapxy(dom,mar=mar,new=TRUE)
-	box()
+	h = prettyBreaks(data,crop=TRUE)
+	#h = hist(data,breaks,plot=FALSE)
 
-	h = hist(data,breaks,plot=FALSE)
+	nppi = prod(par("fin")*ppi)
+	npmax = min(as.integer(nppi/(4*cex)),.Machine$integer.max)
 
-	f = par("fin")
-	npmax = as.integer(min(prod(f*ppi/(4*cex)),.Machine$integer.max))
 	if (length(data) < npmax/100) {
 		cat("--> very few points, magnify plotting symbol (x2)\n")
 		cex = 2*cex
 	} else if (length(data) > 1.2*npmax) {
 		cex = max(.2,round(cex*sqrt(npmax/length(data)),3))
-		npmax = as.integer(min(prod(f*ppi/(4*cex)),.Machine$integer.max))
+		npmax = min(as.integer(nppi/(4*cex)),.Machine$integer.max)
 	}
+
+	# data has already been selected (ie data is field[ind]) but not grid (not anymore)
+	if (length(ind) > 0) grid = grid[ind]
 
 	if (length(data) > 1.2*npmax) {
 		if (! quiet) {
 			cat("--> reducing xy points from",length(data),"to",npmax,"and cex to",cex,"\n")
 		}
 
-		ind = select(grid,npmax)
+		indp = select(grid,npmax)
+		if (length(ind) > 0) indp = which(ind %in% indp)
 
-		b2 = cut(data[ind],h$breaks)
+		b2 = cut(data[indp],h$breaks)
 
 		ilost = which(h$counts > 0 & table(b2) == 0)
 		if (length(ilost) > 0) {
 			b = cut(data,h$breaks)
 			ind1 = which(b %in% levels(b)[ilost])
-			ind = c(ind,ind1)
-			stopifnot(all(! duplicated(ind)))
+			indp = c(indp,ind1)
+			stopifnot(all(! duplicated(indp)))
 			if (! quiet) {
 				cat("--> selecting back",length(ind1),"lost points in",length(ilost),
 					"data bins\n")
 			}
 		}
 
-		grid = grid[ind]
-		data = data[ind]
+		grid = grid[indp]
+		data = data[indp]
 	}
-
-	if (cex < .2) cex = .2
 
 	br = h$breaks
 
-	ind = findInterval(data,br,rightmost.closed=TRUE)
+	indi = findInterval(data,br,rightmost.closed=TRUE)
 	rev = regexpr("\\+$",palette) < 0
 	cols = hcl.colors(length(br),sub("\\+$","",palette),rev=rev)
 
-	tind = table(ind)
+	tind = table(indi)
 
 	p = .Last.projection()
 	if (p$projection == "") {
 		for (i in as.integer(names(sort(tind,decreasing=TRUE)))) {
-			ii = which(ind == i)
-			points(grid@long[ii],grid@lat[ii],col=cols[ind[ii]],pch=pch,cex=cex,...)
+			ii = which(indi == i)
+			points(grid@long[ii],grid@lat[ii],col=cols[i],pch=pch,cex=cex,...)
 		}
 	} else {
 		for (i in as.integer(names(sort(tind,decreasing=TRUE)))) {
-			ii = which(ind == i)
+			ii = which(indi == i)
 			mp = mapproject(grid@long[ii],grid@lat[ii])
-			points(mp$x,mp$y,col=cols[ind],pch=pch,cex=cex,...)
+			points(mp$x,mp$y,col=cols[i],pch=pch,cex=cex,...)
 		}
 	}
 
 	levels = sprintf("% .3g",br)
 	if (any(duplicated(levels))) levels = sprintf("% .4g",br)
 	maplegend(levels,col=cols)
-
-	lines(l)
-	title(main)
 }
 
 maplegend = function(breaks,col,...)
