@@ -168,6 +168,7 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 		xf = grid@long
 		yf = grid@lat
 		x = (long+180)%%360-180
+		if (diff(long) == 360) x = long
 		y = lat
 	} else {
 		stop("lat or long must be of length 1")
@@ -248,7 +249,7 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 		}
 
 		x1 = xf[ip[ind]]
-		data1 = field[ip[ind],]
+		data1 = field[ip[ind],,drop=FALSE]
 	}
 
 	if (all(is.na(x1))) {
@@ -277,9 +278,9 @@ setMethod("sectiongeogrid","Grid",def=function(grid,field,long,lat)
 	stopifnot(all(! is.na(data1[ind,1])))
 
 	if (length(long) == 1) {
-		list(lats=x1[ind],data=data1[ind,])
+		list(lats=x1[ind],data=data1[ind,,drop=FALSE])
 	} else {
-		list(longs=x1[ind],data=data1[ind,])
+		list(longs=x1[ind],data=data1[ind,,drop=FALSE])
 	}
 }
 )
@@ -291,27 +292,27 @@ prettyBreaks = function(x,breaks="Sturges",nmin=5,n=8,crop=FALSE,split=FALSE)
    if (is.character(breaks)) {
       stopifnot(1 < nmin && nmin <= n)
 
-      have = h$counts > 0
+      have = which(h$counts > 0)
       nbin = length(h$counts)
 
       # case for binary values (e.g. 0/1): 2 non-empty bins that are the extreme ones
-      if (length(which(have)) == 2 && all(which(have) %in% c(1,nbin))) {
+      if (length(have) == 2 && all(have %in% c(1,nbin))) {
          if (nbin > 2) {
             h = hist(x,2,plot=FALSE)
             if (length(h$counts) > 2) {
 					cat("--> failed to limit (extreme) bins to 2:",length(h$counts),nbin,"\n")
 				}
          }
-      } else if (nbin > 1.5*n) {
-         h = hist(x,n,plot=FALSE)
+      } else if (nbin > 1.33*n) {
+         h = hist(x,.9*n,plot=FALSE)
 
-         # still too many bins: try n-1
-         if (length(h$counts) > 1.5*n && length(which(h$counts > 0)) > 2) {
-            h = hist(x,n-1,plot=FALSE)
+         # still too many bins: try less
+         if (length(h$counts) > 1.33*n && length(which(h$counts > 0)) > 2) {
+            h = hist(x,.8*n,plot=FALSE)
 			}
 
-         if (length(h$counts) > 1.5*n && length(which(h$counts > 0)) > 2) {
-           cat("--> failed to limit bins from",length(which(have)),nbin,"to",n,":",
+         if (length(h$counts) > 1.33*n && length(which(h$counts > 0)) > 2) {
+           cat("--> failed to limit bins from",length(have),nbin,"to",n,":",
                length(h$counts),"\n")
          }
       }
@@ -378,7 +379,6 @@ mappoints = function(grid,ind,data,palette="YlOrRd",pch=20,cex=.6,ppi=72,quiet=F
 	if (ppi > 144) stop("ppi > 144")
 
 	h = prettyBreaks(data,crop=TRUE)
-	#h = hist(data,breaks,plot=FALSE)
 
 	nppi = prod(par("fin")*ppi)
 	npmax = min(as.integer(nppi/(4*cex)),.Machine$integer.max)
@@ -386,20 +386,21 @@ mappoints = function(grid,ind,data,palette="YlOrRd",pch=20,cex=.6,ppi=72,quiet=F
 	if (length(data) < npmax/100) {
 		cat("--> very few points, magnify plotting symbol (x2)\n")
 		cex = 2*cex
-	} else if (length(data) > 1.2*npmax) {
+	} else if (length(data) > 1.25*npmax) {
 		cex = max(.2,round(cex*sqrt(npmax/length(data)),3))
 		npmax = min(as.integer(nppi/(4*cex)),.Machine$integer.max)
 	}
 
 	# data has already been selected (ie data is field[ind]) but not grid (not anymore)
-	if (length(ind) > 0) grid = grid[ind]
+	if (length(grid) > length(ind) && length(ind) > 0) grid = grid[ind]
 
-	if (length(data) > 1.2*npmax) {
+	if (length(data) > 1.25*npmax) {
 		if (! quiet) {
 			cat("--> reducing xy points from",length(data),"to",npmax,"and cex to",cex,"\n")
 		}
 
-		indp = select(grid,npmax)
+		ngmax = round(sum(grid@nlong)/length(data)*1.25*npmax)
+		indp = select(grid,ngmax)
 		if (length(ind) > 0) indp = which(ind %in% indp)
 
 		b2 = cut(data[indp],h$breaks)
@@ -424,7 +425,7 @@ mappoints = function(grid,ind,data,palette="YlOrRd",pch=20,cex=.6,ppi=72,quiet=F
 
 	indi = findInterval(data,br,rightmost.closed=TRUE)
 	rev = regexpr("\\+$",palette) < 0
-	cols = hcl.colors(length(br),sub("\\+$","",palette),rev=rev)
+	cols = hcl.colors(length(br)-1,sub("\\+$","",palette),rev=rev)
 
 	tind = table(indi)
 
@@ -442,8 +443,10 @@ mappoints = function(grid,ind,data,palette="YlOrRd",pch=20,cex=.6,ppi=72,quiet=F
 		}
 	}
 
-	levels = sprintf("% .3g",br)
-	if (any(duplicated(levels))) levels = sprintf("% .4g",br)
+	levels = sub("0(\\.\\d+)","\\1",sprintf("%.3g",br))
+	if (any(duplicated(levels))) levels = sub("0(\\.\\d+)","\\1",sprintf("%.4g",br))
+	ibr = as.integer(br)
+	if (all(ibr == br) && max(nchar(ibr)) < max(nchar(levels))) levels = ibr
 	maplegend(levels,col=cols)
 }
 

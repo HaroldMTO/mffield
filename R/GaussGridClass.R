@@ -107,9 +107,16 @@ unstretch = function(lat,stretch)
 	theta
 }
 
-equiLat = function(nlat)
+equiLat = function(nlat,delta=0)
 {
-	90*(1-2*(seq(nlat)-.5)/nlat)
+	(90-delta)*(1-2*(seq(nlat)-.5)/nlat)
+}
+
+equiLong = function(theta,nlong=4*length(theta))
+{
+	stopifnot(all(diff(theta) < 0))
+
+	2*round(nlong*cos(theta)/2)
 }
 
 csLat = function(grid)
@@ -258,10 +265,9 @@ geoCoord = function(grid)
 
 setMethod("select","GaussGrid",def=function(grid,npmax)
 {
-	if (length(grid) <= npmax) return(seq(length(grid)))
-
 	# note: 1 is trivial
 	ngp = sum(grid@nlong)
+	if (ngp <= npmax) return(seq(ngp))
 
 	for (nbin in 2:20) {
 		# +1 so that ngp is never met in i1

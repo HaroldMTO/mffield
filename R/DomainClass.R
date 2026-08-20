@@ -36,28 +36,10 @@ setMethod("initialize","Domain",def=function(.Object,long="numeric",lat="numeric
 rangeLong = function(long)
 {
 	if (length(long) == 0) stop("no long provided")
-	if (length(long) == 1) return(long)
-
-	if (length(long) == 2) {
-		dlong1 = long%%360
-		dlong2 = (long+180)%%360-180
-		if (diff(dlong1) < 0) {
-			return(dlong2)
-		} else {
-			return((dlong1+180)%%360-180)
-		}
-	}
+	if (length(long) == 1) return(rep((long+180)%%360-180,2))
 
 	dlong1 = range(long%%360)
 	dlong2 = range((long+180)%%360-180)
-
-	if (FALSE && diff(dlong1) > 180 && diff(dlong2) > 180) {
-		if (diff(dlong1) > diff(dlong2)) {
-			return((dlong1+180)%%360-180)
-		} else {
-			return(dlong2)
-		}
-	}
 
 	if (diff(dlong1) <= diff(dlong2)) {
 		return((dlong1+180)%%360-180)
@@ -83,7 +65,11 @@ inDomain = function(grid,domain)
 
 area = function(dom1,dom2)
 {
-	diff(dom1@xlim)*diff(dom1@ylim)/(diff(dom2@xlim)*diff(dom2@ylim))
+	dx1 = diff(dom1@xlim)
+	if (dx1 < 0) dx1 = 360-dx1
+	dx2 = diff(dom2@xlim)
+	if (dx2 < 0) dx2 = 360-dx2
+	dx1*diff(dom1@ylim)/(dx2*diff(dom2@ylim))
 }
 
 #setMethod("map","Domain",def=mapxy)
